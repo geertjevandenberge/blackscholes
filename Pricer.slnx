@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Pricer.Numerics/Pricer.Numerics.csproj" />
+  <Project Path="Pricer.Web/Pricer.Web.csproj" />
+</Solution>

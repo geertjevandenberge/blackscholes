@@ -1,0 +1,137 @@
+﻿@page "/blackscholespricer"
+@using MudBlazor
+@using Pricer.Numerics
+
+<MudPaper Class="pa-4">
+    <MudText Typo="Typo.h5">Black-Scholes Pricer & Implied Vol Calculator</MudText>
+
+    <MudGrid Class="mt-4" GutterSize="3">
+        <MudItem xs="12" sm="6">
+            <MudSelect @bind-Value="optionType" Label="Option Type">
+                <MudSelectItem Value="OptionType.Call">Call</MudSelectItem>
+                <MudSelectItem Value="OptionType.Put">Put</MudSelectItem>
+            </MudSelect>
+
+            <MudNumericField T="double" @bind-Value="underlyingPrice" Label="Underlying Price" Immediate="true" Class="mt-3" />
+            <MudNumericField T="double" @bind-Value="strike" Label="Strike" Immediate="true" Class="mt-3" />
+            <MudNumericField T="double" @bind-Value="interestRate" Label="Interest Rate (as decimal)" Immediate="true" Class="mt-3" />
+            <MudNumericField T="double" @bind-Value="volatility" Label="Volatility (sigma)" Immediate="true" Class="mt-3" />
+            <MudNumericField T="double" @bind-Value="timeToMaturity" Label="Time to Maturity (years)" Immediate="true" Class="mt-3" />
+        </MudItem>
+
+        <MudItem xs="12" sm="6">
+            <MudNumericField T="double" @bind-Value="marketPrice" Label="Market Price (for implied vol)" Immediate="true" />
+            <MudNumericField T="double" @bind-Value="tolerance" Label="Tolerance" Immediate="true" Class="mt-3" />
+            <MudNumericField T="int" @bind-Value="maxIterations" Label="Max Iterations" Immediate="true" Class="mt-3" />
+
+            <MudStack Class="mt-4" Row="true" Spacing="2">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CalculatePrice">Calculate Price</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="ComputeImpliedVol">Compute Implied Vol</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Info" OnClick="ComputeBachelierImpliedVol">Bachelier Implied Vol (ATM)</MudButton>
+                <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="Clear">Clear</MudButton>
+            </MudStack>
+
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <MudAlert Severity="Severity.Error" Class="mt-3">@errorMessage</MudAlert>
+            }
+
+            <MudPaper Class="pa-3 mt-3">
+                <MudText Typo="Typo.subtitle1">Results</MudText>
+                <MudDivider Class="my-2" />
+                <MudText>Price: @((price.HasValue) ? price.Value.ToString("G6") : "-")</MudText>
+                <MudText>Implied Vol: @((impliedVol.HasValue) ? impliedVol.Value.ToString("G6") : "-")</MudText>
+                <MudText>Bachelier Implied Vol (ATM): @((bachelierImpliedVol.HasValue) ? bachelierImpliedVol.Value.ToString("G6") : "-")</MudText>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@code {
+
+    private OptionType optionType = OptionType.Call;
+
+    private double underlyingPrice = 100;
+    private double strike = 100;
+    private double interestRate = 0.05;
+    private double volatility = 0.2;
+    private double timeToMaturity = 1.0;
+
+    private double? price;
+    private string? errorMessage;
+
+    private double marketPrice = 10.0;
+    private double tolerance = 1e-8;
+    private int maxIterations = 100;
+    private double? impliedVol;
+    private double? bachelierImpliedVol;
+
+    private void CalculatePrice()
+    {
+        errorMessage = null;
+        try
+        {
+            var blackScholesPricer = new BlackScholes(
+                optionType,
+                interestRate,
+                timeToMaturity,
+                volatility,
+                strike,
+                underlyingPrice
+            );
+
+            price = blackScholesPricer.Price();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+            price = null;
+        }
+    }
+
+    private void ComputeImpliedVol()
+    {
+        errorMessage = null;
+        try
+        {
+            impliedVol = ImpliedVolatilityCalculator.Compute(
+                optionType,
+                marketPrice,
+                interestRate,
+                timeToMaturity,
+                strike,
+                underlyingPrice,
+                0.2D,
+                tolerance,
+                maxIterations
+            );
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+            impliedVol = null;
+        }
+    }
+
+    private void ComputeBachelierImpliedVol()
+    {
+        errorMessage = null;
+        try
+        {
+            bachelierImpliedVol = ImpliedVolatilityCalculator.BachelierImpliedVolATM(marketPrice, underlyingPrice, timeToMaturity, interestRate);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+            bachelierImpliedVol = null;
+        }
+    }
+
+    private void Clear()
+    {
+        price = null;
+        impliedVol = null;
+        bachelierImpliedVol = null;
+        errorMessage = null;
+    }
+}

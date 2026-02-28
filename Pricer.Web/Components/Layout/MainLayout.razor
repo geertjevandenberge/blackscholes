@@ -1,0 +1,109 @@
+﻿@inherits LayoutComponentBase
+
+<MudThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<div class="page">
+    <div class="sidebar">
+        <NavMenu />
+    </div>
+
+    <main>
+        <div class="top-row px-4">
+            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
+        </div>
+
+        <article class="content px-4">
+            @Body
+        </article>
+    </main>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">🗙</span>
+</div>
+
+@*
+@inherits LayoutComponentBase
+@using MudBlazor
+
+ <MudThemeProvider Theme="_theme" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+
+    <!-- Top App Bar -->
+    <MudAppBar Elevation="1" Color="Color.Primary">
+        <MudIconButton Icon="@Icons.Material.Filled.Menu"
+                       Color="Color.Inherit"
+                       Edge="Edge.Start"
+                       OnClick="ToggleDrawer" />
+        <MudText Typo="Typo.h6">
+            Black–Scholes App
+        </MudText>
+    </MudAppBar>
+
+    <!-- Side Drawer -->
+    <MudDrawer @bind-Open="_drawerOpen"
+               Elevation="1"
+               Variant="DrawerVariant.Responsive"
+               ClipMode="DrawerClipMode.Always"
+               Class="mud-theme-dark">
+
+        <MudNavMenu Dense="true" Rounded="true">
+
+            <MudNavLink Href="/" Icon="@Icons.Material.Filled.Home">
+                Home
+            </MudNavLink>
+
+            <MudNavLink Href="/blackscholespricer"
+                        Icon="@Icons.Material.Filled.ShowChart">
+                Black–Scholes Pricer
+            </MudNavLink>
+
+            <MudNavLink Href="/about"
+                        Icon="@Icons.Material.Filled.Info">
+                About
+            </MudNavLink>
+
+        </MudNavMenu>
+
+    </MudDrawer>
+
+    <!-- Main Content -->
+    <MudMainContent Class="pa-8 mt-6">
+        @Body
+    </MudMainContent>
+
+</MudLayout>
+
+@code {
+    private bool _drawerOpen = true;
+
+    private void ToggleDrawer()
+    {
+        _drawerOpen = !_drawerOpen;
+    }
+
+    private MudTheme _theme = new MudTheme()
+    {
+        PaletteLight = new PaletteLight()
+        {
+            Primary = "#1E3A5F",          // Deep finance blue
+            Secondary = "#00A3A3",        // Teal accent
+            AppbarBackground = "#1E3A5F",
+
+            DrawerBackground = "#F1F3F5",  // Light grey
+            Background = "#F8F9FA",        // Very soft grey page background
+            Surface = "#FFFFFF",
+
+            TextPrimary = "#212529"
+        }
+    };
+} *@
