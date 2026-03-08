@@ -1,0 +1,170 @@
+@page "/brownian-motion"
+@using MudBlazor
+@using MudBlazor.Charts
+
+<MudPaper Class="pa-4">
+    <MudText Typo="Typo.h5">Brownian Motion Simulator</MudText>
+
+    <MudGrid Class="mt-4" GutterSize="3">
+        <MudItem xs="12" sm="6" md="4">
+            <MudPaper Class="pa-4" Elevation="2" Style="height: 100%;">
+                <MudNumericField T="double" @bind-Value="timeHorizon" Label="Time Horizon (years)" Immediate="true" Min="0.1" Max="50" />
+                <MudNumericField T="double" @bind-Value="drift" Label="Drift (μ)" Immediate="true" Class="mt-3" />
+                <MudNumericField T="double" @bind-Value="volatility" Label="Volatility (σ)" Immediate="true" Class="mt-3" Min="0.001" />
+                <MudNumericField T="int" @bind-Value="numPaths" Label="Paths" Immediate="true" Class="mt-3" Min="1" Max="5" />
+                <MudButton Class="mt-4" Variant="Variant.Filled" Color="Color.Primary" OnClick="Simulate" FullWidth="true">Simulate</MudButton>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" sm="6" md="8">
+            <MudPaper Class="pa-4" Elevation="2" Style="height: 100%;">
+                <MudText Typo="Typo.subtitle1" Class="mb-2">
+                    Random Walk → Brownian Motion
+                </MudText>
+                <MudText Typo="Typo.body2" Class="mb-3">
+                    @GetStepsDescription()
+                </MudText>
+                <MudSlider T="int" 
+                           @bind-Value="steps" 
+                           Min="10" 
+                           Max="500" 
+                           Step="10"
+                           ValueLabel="true"
+                           Color="Color.Primary"
+                           Immediate="true"
+                           ValueLabelFormat="@($"{steps} steps (Δt = {(timeHorizon/steps):F4})")"
+                           Class="mt-2">
+                    <MudText Typo="Typo.caption">Steps: @steps</MudText>
+                </MudSlider>
+                <MudStack Row="true" Justify="Justify.SpaceBetween" Class="mt-2">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Coarse Random Walk</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Fine Brownian Motion</MudText>
+                </MudStack>
+
+                <MudDivider Class="my-4" />
+
+                <MudText Typo="Typo.subtitle1" Class="mb-2">
+                    Volatility Scaling: σ · (Δt)^α
+                </MudText>
+                <MudText Typo="Typo.body2" Class="mb-3">
+                    @GetScalingDescription()
+                </MudText>
+                <MudSlider T="double" 
+                           @bind-Value="scalingExponent" 
+                           Min="0.2" 
+                           Max="0.8" 
+                           Step="0.05"
+                           ValueLabel="true"
+                           Color="Color.Primary"
+                           Immediate="true"
+                           ValueLabelFormat="@($"α = {scalingExponent:F2}")"
+                           Class="mt-2">
+                    <MudText Typo="Typo.caption">Exponent: @scalingExponent.ToString("F2")</MudText>
+                </MudSlider>
+                <MudStack Row="true" Justify="Justify.SpaceBetween" Class="mt-2">
+                    <MudText Typo="Typo.caption" Color="Color.Error">Freezing (α &lt; 0.5)</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Success">Brownian (α = 0.5)</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Warning">Explosion (α &gt; 0.5)</MudText>
+                </MudStack>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+<MudPaper Class="pa-2 mt-4">
+    <MudChart T="double"
+              ChartType="ChartType.Timeseries"
+              ChartSeries="@series"
+              ChartOptions="@options"
+              Width="100%" 
+              Height="500px"
+              MatchBoundsToSize="true" />
+</MudPaper>
+
+@code {
+    private double timeHorizon = 1.0;
+    private int steps = 252;
+    private double drift = 0.0;
+    private double volatility = 1.0;
+    private int numPaths = 1;
+    private double scalingExponent = 0.5;
+
+    private List<ChartSeries<double>> series = [];
+    private TimeSeriesChartOptions options = new();
+
+    private readonly Random _rng = new();
+
+    protected override void OnInitialized() => Simulate();
+
+    protected override void OnParametersSet()
+    {
+        Simulate();
+    }
+
+    private string GetStepsDescription()
+    {
+        double dt = timeHorizon / steps;
+        if (steps < 50)
+            return $"With {steps} steps, you see a coarse random walk with large jumps (Δt = {dt:F4}). Each step is clearly visible.";
+        else if (steps < 150)
+            return $"With {steps} steps, the path is smoother. The discrete nature is still visible but less pronounced (Δt = {dt:F4}).";
+        else
+            return $"With {steps} steps, the path closely approximates continuous Brownian motion (Δt = {dt:F4}). The discrete jumps are barely visible.";
+    }
+
+    private string GetScalingDescription()
+    {
+        if (scalingExponent < 0.45)
+            return $"With α = {scalingExponent:F2} < 0.5, the variance scales too slowly. As Δt → 0, the path 'freezes' and flattens. Not a proper limit.";
+        else if (scalingExponent < 0.55)
+            return $"With α = {scalingExponent:F2} ≈ 0.5, the variance scales correctly as √Δt. This gives proper Brownian motion in the limit.";
+        else
+            return $"With α = {scalingExponent:F2} > 0.5, the variance scales too fast. As Δt → 0, the path 'explodes' and becomes unbounded. Not a proper limit.";
+    }
+
+    private void Simulate()
+    {
+        double dt = timeHorizon / steps;
+        double scaledVolatility = volatility * Math.Pow(dt, scalingExponent);
+
+        // Start from January 1st of the current year
+        var startDate = new DateTime(DateTime.Now.Year, 1, 1);
+
+        options = new TimeSeriesChartOptions
+        {
+            InterpolationOption = InterpolationOption.Straight,
+            LineStrokeWidth = 2,
+            TimeLabelFormat = "MM/yyyy",
+            TimeLabelSpacing = TimeSpan.FromDays(90),
+            TimeLabelSpacingRounding = true
+        };
+
+        series = [];
+        for (int p = 0; p < numPaths; p++)
+        {
+            var data = new List<TimeValue<double>>(steps + 1);
+            double w = 0.0;
+            for (int i = 0; i <= steps; i++)
+            {
+                // Map step to date
+                double daysFromStart = (i * dt) * 365.0;
+                data.Add(new TimeValue<double>(startDate.AddDays(daysFromStart), w));
+
+                if (i < steps)
+                    w += drift * dt + scaledVolatility * SampleStandardNormal();
+            }
+            series.Add(new ChartSeries<double>
+            {
+                Name = numPaths > 1 ? $"Path {p + 1}" : "W(t)",
+                Data = data
+            });
+        }
+    }
+
+    private double SampleStandardNormal()
+    {
+        double u1 = 1.0 - _rng.NextDouble();
+        double u2 = 1.0 - _rng.NextDouble();
+        return Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Cos(2.0 * Math.PI * u2);
+    }
+}
