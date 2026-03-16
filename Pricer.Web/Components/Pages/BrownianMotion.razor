@@ -1,6 +1,7 @@
 @page "/brownian-motion"
 @using MudBlazor
 @using MudBlazor.Charts
+@using Pricer.Numerics
 
 <MudPaper Class="pa-4">
     <MudText Typo="Typo.h5">Brownian Motion Simulator</MudText>
@@ -81,6 +82,62 @@
               MatchBoundsToSize="true" />
 </MudPaper>
 
+<MudDivider Class="my-6" />
+
+<MudPaper Class="pa-4">
+    <MudText Typo="Typo.h5">Correlated Brownian Motions</MudText>
+
+    <MudGrid Class="mt-4" GutterSize="3">
+        <MudItem xs="12" sm="6" md="4">
+            <MudPaper Class="pa-4" Elevation="2" Style="height: 100%;">
+                <MudNumericField T="double" @bind-Value="correlatedTimeHorizon" Label="Time Horizon (years)" Immediate="true" Min="0.1" Max="50" />
+                <MudNumericField T="double" @bind-Value="correlatedDrift" Label="Drift (μ)" Immediate="true" Class="mt-3" />
+                <MudNumericField T="double" @bind-Value="correlatedVolatility" Label="Volatility (σ)" Immediate="true" Class="mt-3" Min="0.001" />
+                <MudNumericField T="int" @bind-Value="correlatedSteps" Label="Steps" Immediate="true" Class="mt-3" Min="10" Max="500" />
+                <MudButton Class="mt-4" Variant="Variant.Filled" Color="Color.Primary" OnClick="SimulateCorrelated" FullWidth="true">Simulate</MudButton>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" sm="6" md="8">
+            <MudPaper Class="pa-4" Elevation="2" Style="height: 100%;">
+                <MudText Typo="Typo.subtitle1" Class="mb-2">
+                    Correlation Coefficient
+                </MudText>
+                <MudText Typo="Typo.body2" Class="mb-3">
+                    @GetCorrelationDescription()
+                </MudText>
+                <MudSlider T="double"
+                           @bind-Value="correlationCoefficient"
+                           Min="-1.0"
+                           Max="1.0"
+                           Step="0.05"
+                           ValueLabel="true"
+                           Color="Color.Primary"
+                           Immediate="true"
+                           ValueLabelFormat="@($"ρ = {correlationCoefficient:F2}")"
+                           Class="mt-2">
+                    <MudText Typo="Typo.caption">Correlation: @correlationCoefficient.ToString("F2")</MudText>
+                </MudSlider>
+                <MudStack Row="true" Justify="Justify.SpaceBetween" Class="mt-2">
+                    <MudText Typo="Typo.caption" Color="Color.Error">Perfect Negative (ρ = -1)</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Info">Independent (ρ = 0)</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Success">Perfect Positive (ρ = 1)</MudText>
+                </MudStack>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+<MudPaper Class="pa-2 mt-4">
+    <MudChart T="double"
+              ChartType="ChartType.Timeseries"
+              ChartSeries="@correlatedSeries"
+              ChartOptions="@correlatedOptions"
+              Width="100%" 
+              Height="500px"
+              MatchBoundsToSize="true" />
+</MudPaper>
+
 @code {
     private double timeHorizon = 1.0;
     private int steps = 252;
@@ -92,7 +149,16 @@
     private List<ChartSeries<double>> series = [];
     private TimeSeriesChartOptions options = new();
 
-    private readonly Random _rng = new();
+    // Correlated Brownian Motion properties
+    private double correlatedTimeHorizon = 1.0;
+    private int correlatedSteps = 252;
+    private double correlatedDrift = 0.0;
+    private double correlatedVolatility = 1.0;
+    private double correlationCoefficient = 0.5;
+    private List<ChartSeries<double>> correlatedSeries = [];
+    private TimeSeriesChartOptions correlatedOptions = new();
+
+    private BrownianMotionGenerator _brownianGenerator = new();
 
     protected override void OnInitialized() => Simulate();
 
@@ -122,13 +188,24 @@
             return $"With α = {scalingExponent:F2} > 0.5, the variance scales too fast. As Δt → 0, the path 'explodes' and becomes unbounded. Not a proper limit.";
     }
 
+    private string GetCorrelationDescription()
+    {
+        if (correlationCoefficient < -0.8)
+            return $"With ρ = {correlationCoefficient:F2}, the two motions move strongly in opposite directions. When one goes up, the other tends to go down.";
+        else if (correlationCoefficient < -0.2)
+            return $"With ρ = {correlationCoefficient:F2}, there's negative correlation. The motions tend to move in opposite directions, but not perfectly.";
+        else if (correlationCoefficient < 0.2)
+            return $"With ρ = {correlationCoefficient:F2}, the motions are nearly independent. Their movements are largely uncorrelated.";
+        else if (correlationCoefficient < 0.8)
+            return $"With ρ = {correlationCoefficient:F2}, there's positive correlation. The motions tend to move in the same direction, but not perfectly.";
+        else
+            return $"With ρ = {correlationCoefficient:F2}, the two motions move strongly together. When one goes up, the other tends to go up as well.";
+    }
+
     private void Simulate()
     {
-        double dt = timeHorizon / steps;
-        double scaledVolatility = volatility * Math.Pow(dt, scalingExponent);
-
-        // Start from January 1st of the current year
         var startDate = new DateTime(DateTime.Now.Year, 1, 1);
+        var paths = _brownianGenerator.GeneratePaths(timeHorizon, steps, drift, volatility, scalingExponent, numPaths, startDate);
 
         options = new TimeSeriesChartOptions
         {
@@ -140,19 +217,14 @@
         };
 
         series = [];
-        for (int p = 0; p < numPaths; p++)
+        for (int p = 0; p < paths.Count; p++)
         {
-            var data = new List<TimeValue<double>>(steps + 1);
-            double w = 0.0;
-            for (int i = 0; i <= steps; i++)
+            var data = new List<TimeValue<double>>();
+            foreach (var point in paths[p])
             {
-                // Map step to date
-                double daysFromStart = (i * dt) * 365.0;
-                data.Add(new TimeValue<double>(startDate.AddDays(daysFromStart), w));
-
-                if (i < steps)
-                    w += drift * dt + scaledVolatility * SampleStandardNormal();
+                data.Add(new TimeValue<double>(point.Time, point.Value));
             }
+
             series.Add(new ChartSeries<double>
             {
                 Name = numPaths > 1 ? $"Path {p + 1}" : "W(t)",
@@ -161,10 +233,46 @@
         }
     }
 
-    private double SampleStandardNormal()
+    private void SimulateCorrelated()
     {
-        double u1 = 1.0 - _rng.NextDouble();
-        double u2 = 1.0 - _rng.NextDouble();
-        return Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Cos(2.0 * Math.PI * u2);
+        var startDate = new DateTime(DateTime.Now.Year, 1, 1);
+        var (path1, path2) = _brownianGenerator.GenerateCorrelatedPaths(
+            correlatedTimeHorizon, correlatedSteps, correlatedDrift, correlatedVolatility, correlationCoefficient, startDate);
+
+        correlatedOptions = new TimeSeriesChartOptions
+        {
+            InterpolationOption = InterpolationOption.Straight,
+            LineStrokeWidth = 2,
+            TimeLabelFormat = "MM/yyyy",
+            TimeLabelSpacing = TimeSpan.FromDays(90),
+            TimeLabelSpacingRounding = true
+        };
+
+        var data1 = new List<TimeValue<double>>();
+        var data2 = new List<TimeValue<double>>();
+
+        foreach (var point in path1)
+        {
+            data1.Add(new TimeValue<double>(point.Time, point.Value));
+        }
+
+        foreach (var point in path2)
+        {
+            data2.Add(new TimeValue<double>(point.Time, point.Value));
+        }
+
+        correlatedSeries = new List<ChartSeries<double>>
+        {
+            new ChartSeries<double>
+            {
+                Name = "W₁(t)",
+                Data = data1
+            },
+            new ChartSeries<double>
+            {
+                Name = "W₂(t)",
+                Data = data2
+            }
+        };
     }
 }
