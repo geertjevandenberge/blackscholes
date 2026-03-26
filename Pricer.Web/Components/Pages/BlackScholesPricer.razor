@@ -1,5 +1,6 @@
 ﻿@page "/blackscholespricer"
 @using MudBlazor
+@using MudBlazor.Charts
 @using Pricer.Numerics
 
 <MudPaper Class="pa-4">
@@ -45,6 +46,32 @@
             </MudPaper>
         </MudItem>
     </MudGrid>
+</MudPaper>
+
+<MudPaper Class="pa-4 mt-4">
+    <MudText Typo="Typo.h6" Class="mb-1">Call Price vs. Spot — Convergence to Intrinsic Value</MudText>
+    <MudText Typo="Typo.body2" Class="mb-4">
+        Drag the slider towards zero: the Black-Scholes price (blue) collapses onto the intrinsic value max(S&nbsp;&minus;&nbsp;K,&nbsp;0) (orange).
+    </MudText>
+    <MudSlider T="double"
+               @bind-Value="chartTime"
+               Min="0.01"
+               Max="3.0"
+               Step="0.01"
+               ValueLabel="true"
+               Color="Color.Primary"
+               Immediate="true"
+               ValueLabelFormat="@($"T = {chartTime:F2} y")"
+               Class="mb-4">
+        <MudText Typo="Typo.caption">Time to Maturity: @chartTime.ToString("F2") years</MudText>
+    </MudSlider>
+    <MudChart T="double"
+              ChartType="ChartType.Line"
+              ChartSeries="@chartSeries"
+              XAxisLabels="@chartXLabels"
+              ChartOptions="@chartOptions"
+              Width="100%"
+              Height="350px" />
 </MudPaper>
 
 @code {
@@ -133,5 +160,46 @@
         impliedVol = null;
         bachelierImpliedVol = null;
         errorMessage = null;
+    }
+
+    // Chart state
+    private double _chartTime = 1.0;
+    private double chartTime
+    {
+        get => _chartTime;
+        set { _chartTime = value; BuildChartData(); }
+    }
+
+    private List<ChartSeries<double>> chartSeries = [];
+    private string[] chartXLabels = [];
+    private ChartOptions chartOptions = new();
+
+    protected override void OnInitialized() => BuildChartData();
+
+    private void BuildChartData()
+    {
+        const int points = 60;
+        double spotMin = strike * 0.5;
+        double spotMax = strike * 1.5;
+        double spotStep = (spotMax - spotMin) / (points - 1);
+
+        var bsPrices = new double[points];
+        var intrinsic = new double[points];
+        var labels = new string[points];
+
+        for (int i = 0; i < points; i++)
+        {
+            double s = spotMin + i * spotStep;
+            labels[i] = i % 10 == 0 ? s.ToString("F0") : "";
+            intrinsic[i] = Math.Max(s - strike, 0.0);
+            bsPrices[i] = new BlackScholes(OptionType.Call, interestRate, _chartTime, volatility, strike, s).Price();
+        }
+
+        chartXLabels = labels;
+        chartSeries =
+        [
+            new ChartSeries<double> { Name = $"BS Call  (T = {_chartTime:F2} y)", Data = bsPrices },
+            new ChartSeries<double> { Name = "Intrinsic Value", Data = intrinsic }
+        ];
     }
 }
