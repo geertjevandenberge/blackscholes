@@ -1,0 +1,351 @@
+@page "/greeks"
+@using MudBlazor
+@using Pricer.Numerics
+@using Plotly.Blazor
+@using Plotly.Blazor.ConfigLib
+@using Plotly.Blazor.LayoutLib
+@using Plotly.Blazor.Traces
+@using Plotly.Blazor.Traces.ScatterLib
+
+<MudPaper Class="pa-4">
+    <MudText Typo="Typo.h5">Greeks</MudText>
+    <MudText Typo="Typo.body2" Class="mb-4">
+        Black–Scholes price and Greeks for common strategies, evaluated at S = @Spot.ToString("F2").
+        Adjust time and volatility to see sensitivities.
+    </MudText>
+
+    <MudGrid GutterSize="3">
+        <MudItem xs="12" md="6">
+            <MudSlider T="double"
+                       @bind-Value="TimeToMaturity"
+                       Min="0.01"
+                       Max="3.0"
+                       Step="0.01"
+                       Immediate="true"
+                       ValueLabel="true"
+                       ValueLabelFormat="@($"T = {TimeToMaturity:F2} y")"
+                       Color="Color.Primary" />
+
+            <MudSlider T="double"
+                       @bind-Value="Volatility"
+                       Min="0.01"
+                       Max="1.0"
+                       Step="0.01"
+                       Immediate="true"
+                       ValueLabel="true"
+                       ValueLabelFormat="@($"σ = {Volatility:F2}")"
+                       Color="Color.Secondary"
+                       Class="mt-4" />
+
+            <MudSelect T="StrategyKind" @bind-Value="SelectedStrategy" Label="Strategy" Class="mt-4">
+                <MudSelectItem Value="StrategyKind.Call">Call</MudSelectItem>
+                <MudSelectItem Value="StrategyKind.Put">Put</MudSelectItem>
+                <MudSelectItem Value="StrategyKind.CallSpread">Call Spread</MudSelectItem>
+                <MudSelectItem Value="StrategyKind.Straddle">Straddle</MudSelectItem>
+                <MudSelectItem Value="StrategyKind.Butterfly">Butterfly</MudSelectItem>
+            </MudSelect>
+
+            <MudPaper Class="pa-3 mt-4">
+                <MudText Typo="Typo.subtitle2">Model inputs (fixed)</MudText>
+                <MudDivider Class="my-2" />
+                <MudText Typo="Typo.body2">Spot (S): @Spot.ToString("F2")</MudText>
+                <MudText Typo="Typo.body2">ATM Strike (K): @AtmStrike.ToString("F2")</MudText>
+                <MudText Typo="Typo.body2">r: @RiskFreeRate.ToString("P2")</MudText>
+                <MudText Typo="Typo.body2">q: @DividendYield.ToString("P2")</MudText>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="6">
+            <MudTable Items="rows" Dense="true" Hover="true">
+                <HeaderContent>
+                    <MudTh>Strategy</MudTh>
+                    <MudTh align="right">Price</MudTh>
+                    <MudTh align="right">Delta</MudTh>
+                    <MudTh align="right">Gamma</MudTh>
+                    <MudTh align="right">Theta</MudTh>
+                    <MudTh align="right">Vega</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Strategy">@context.Name</MudTd>
+                    <MudTd DataLabel="Price" align="right">@Format(context.Greeks.Price)</MudTd>
+                    <MudTd DataLabel="Delta" align="right">@Format(context.Greeks.Delta)</MudTd>
+                    <MudTd DataLabel="Gamma" align="right">@Format(context.Greeks.Gamma)</MudTd>
+                    <MudTd DataLabel="Theta" align="right">@Format(context.Greeks.Theta)</MudTd>
+                    <MudTd DataLabel="Vega" align="right">@Format(context.Greeks.Vega)</MudTd>
+                </RowTemplate>
+            </MudTable>
+        </MudItem>
+
+        <MudItem xs="12">
+            <MudPaper Class="pa-4 mt-2">
+                <MudText Typo="Typo.h6">@SelectedStrategy charts</MudText>
+
+                <MudGrid GutterSize="3" Class="mt-2">
+                    <MudItem xs="12" md="6">
+                        <MudText Typo="Typo.subtitle2">Price</MudText>
+                        <PlotlyChart @ref="priceChart" Data="priceChartData" Layout="priceChartLayout" Config="chartConfig" Style="height: 320px; width: 100%;" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudText Typo="Typo.subtitle2">Delta</MudText>
+                        <PlotlyChart @ref="deltaChart" Data="deltaChartData" Layout="deltaChartLayout" Config="chartConfig" Style="height: 320px; width: 100%;" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudText Typo="Typo.subtitle2">Gamma</MudText>
+                        <PlotlyChart @ref="gammaChart" Data="gammaChartData" Layout="gammaChartLayout" Config="chartConfig" Style="height: 320px; width: 100%;" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudText Typo="Typo.subtitle2">Theta</MudText>
+                        <PlotlyChart @ref="thetaChart" Data="thetaChartData" Layout="thetaChartLayout" Config="chartConfig" Style="height: 320px; width: 100%;" />
+                    </MudItem>
+                    <MudItem xs="12">
+                        <MudText Typo="Typo.subtitle2">Vega</MudText>
+                        <PlotlyChart @ref="vegaChart" Data="vegaChartData" Layout="vegaChartLayout" Config="chartConfig" Style="height: 320px; width: 100%;" />
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@code {
+    private const double Spot = 100.0;
+    private const double AtmStrike = 100.0;
+    private const double RiskFreeRate = 0.05;
+    private const double DividendYield = 0.0;
+
+    private const double SpreadLowStrike = 95.0;
+    private const double SpreadHighStrike = 105.0;
+
+    private const double ButterflyLowStrike = 90.0;
+    private const double ButterflyMidStrike = 100.0;
+    private const double ButterflyHighStrike = 110.0;
+
+    private double _timeToMaturity = 1.0;
+    private double TimeToMaturity
+    {
+        get => _timeToMaturity;
+        set
+        {
+            _timeToMaturity = value;
+            Recalculate();
+        }
+    }
+
+    private double _volatility = 0.20;
+    private double Volatility
+    {
+        get => _volatility;
+        set
+        {
+            _volatility = value;
+            Recalculate();
+        }
+    }
+
+    private StrategyKind _selectedStrategy = StrategyKind.Call;
+    private StrategyKind SelectedStrategy
+    {
+        get => _selectedStrategy;
+        set
+        {
+            _selectedStrategy = value;
+            BuildCharts();
+            StateHasChanged();
+        }
+    }
+
+    private List<StrategyRow> rows = [];
+
+    private readonly Config chartConfig = new() { Responsive = true, DisplayModeBar = DisplayModeBarEnum.False };
+
+    private Layout priceChartLayout = new();
+    private List<ITrace> priceChartData = [];
+
+    private Layout deltaChartLayout = new();
+    private List<ITrace> deltaChartData = [];
+
+    private Layout gammaChartLayout = new();
+    private List<ITrace> gammaChartData = [];
+
+    private Layout thetaChartLayout = new();
+    private List<ITrace> thetaChartData = [];
+
+    private Layout vegaChartLayout = new();
+    private List<ITrace> vegaChartData = [];
+
+    private PlotlyChart? priceChart;
+    private PlotlyChart? deltaChart;
+    private PlotlyChart? gammaChart;
+    private PlotlyChart? thetaChart;
+    private PlotlyChart? vegaChart;
+
+    private bool chartsNeedReact;
+
+    protected override void OnInitialized()
+    {
+        Recalculate();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!chartsNeedReact)
+            return;
+
+        chartsNeedReact = false;
+
+        var tasks = new List<Task>(5);
+
+        if (priceChart is not null) tasks.Add(priceChart.React());
+        if (deltaChart is not null) tasks.Add(deltaChart.React());
+        if (gammaChart is not null) tasks.Add(gammaChart.React());
+        if (thetaChart is not null) tasks.Add(thetaChart.React());
+        if (vegaChart is not null) tasks.Add(vegaChart.React());
+
+        if (tasks.Count > 0)
+            await Task.WhenAll(tasks);
+    }
+
+    private void Recalculate()
+    {
+        rows =
+        [
+            new("Call", StrategyCall()),
+            new("Put", StrategyPut()),
+            new("Call Spread", StrategyCallSpread()),
+            new("Straddle", StrategyStraddle()),
+            new("Butterfly", StrategyButterfly())
+        ];
+
+        BuildCharts();
+        StateHasChanged();
+    }
+
+    private void BuildCharts()
+    {
+        const int points = 101;
+        const double spotMin = 50.0;
+        const double spotMax = 150.0;
+
+        var x = new object[points];
+        var price = new object[points];
+        var delta = new object[points];
+        var gamma = new object[points];
+        var theta = new object[points];
+        var vega = new object[points];
+
+        for (int i = 0; i < points; i++)
+        {
+            var s = spotMin + (spotMax - spotMin) * i / (points - 1);
+            x[i] = s;
+
+            var g = StrategyAtSpot(SelectedStrategy, s);
+            price[i] = g.Price;
+            delta[i] = g.Delta;
+            gamma[i] = g.Gamma;
+            theta[i] = g.Theta;
+            vega[i] = g.Vega;
+        }
+
+        (priceChartData, priceChartLayout) = BuildMetricChart("Price", x, price);
+        (deltaChartData, deltaChartLayout) = BuildMetricChart("Delta", x, delta);
+        (gammaChartData, gammaChartLayout) = BuildMetricChart("Gamma", x, gamma);
+        (thetaChartData, thetaChartLayout) = BuildMetricChart("Theta", x, theta);
+        (vegaChartData, vegaChartLayout) = BuildMetricChart("Vega", x, vega);
+
+        chartsNeedReact = true;
+    }
+
+    private (List<ITrace> data, Layout layout) BuildMetricChart(string metricName, object[] x, object[] y)
+    {
+        var layout = new Layout
+        {
+            Title = new Plotly.Blazor.LayoutLib.Title
+            {
+                Text = $"{SelectedStrategy} — {metricName} (T={TimeToMaturity:F2}, σ={Volatility:F2})"
+            },
+            XAxis = new List<Plotly.Blazor.LayoutLib.XAxis>
+            {
+                new()
+                {
+                    Title = new Plotly.Blazor.LayoutLib.XAxisLib.Title { Text = "Spot (S)" }
+                }
+            },
+            YAxis = new List<Plotly.Blazor.LayoutLib.YAxis>
+            {
+                new()
+                {
+                    Title = new Plotly.Blazor.LayoutLib.YAxisLib.Title { Text = metricName }
+                }
+            },
+            Margin = new Plotly.Blazor.LayoutLib.Margin { L = 60, R = 20, T = 50, B = 50 }
+        };
+
+        var data = new List<ITrace>
+        {
+            new Scatter { Name = SelectedStrategy.ToString(), X = x, Y = y, Mode = ModeFlag.Lines }
+        };
+
+        return (data, layout);
+    }
+
+    private GreekValues StrategyAtSpot(StrategyKind strategy, double spot)
+        => strategy switch
+        {
+            StrategyKind.Call => StrategyCall(spot),
+            StrategyKind.Put => StrategyPut(spot),
+            StrategyKind.CallSpread => StrategyCallSpread(spot),
+            StrategyKind.Straddle => StrategyStraddle(spot),
+            StrategyKind.Butterfly => StrategyButterfly(spot),
+            _ => StrategyCall(spot)
+        };
+
+    private GreekValues StrategyCall(double? spotOverride = null)
+        => OptionGreeks(OptionType.Call, AtmStrike, spotOverride ?? Spot, 1.0);
+
+    private GreekValues StrategyPut(double? spotOverride = null)
+        => OptionGreeks(OptionType.Put, AtmStrike, spotOverride ?? Spot, 1.0);
+
+    private GreekValues StrategyCallSpread(double? spotOverride = null)
+        => OptionGreeks(OptionType.Call, SpreadLowStrike, spotOverride ?? Spot, 1.0)
+           + OptionGreeks(OptionType.Call, SpreadHighStrike, spotOverride ?? Spot, -1.0);
+
+    private GreekValues StrategyStraddle(double? spotOverride = null)
+        => OptionGreeks(OptionType.Call, AtmStrike, spotOverride ?? Spot, 1.0)
+           + OptionGreeks(OptionType.Put, AtmStrike, spotOverride ?? Spot, 1.0);
+
+    private GreekValues StrategyButterfly(double? spotOverride = null)
+        => OptionGreeks(OptionType.Call, ButterflyLowStrike, spotOverride ?? Spot, 1.0)
+           + OptionGreeks(OptionType.Call, ButterflyMidStrike, spotOverride ?? Spot, -2.0)
+           + OptionGreeks(OptionType.Call, ButterflyHighStrike, spotOverride ?? Spot, 1.0);
+
+    private GreekValues OptionGreeks(OptionType optionType, double strike, double spot, double weight)
+    {
+        var bs = new BlackScholesGreeks(optionType, RiskFreeRate, TimeToMaturity, Volatility, strike, spot, DividendYield);
+
+        return new GreekValues(
+            weight * bs.Price(),
+            weight * bs.Delta(),
+            weight * bs.Gamma(),
+            weight * bs.Theta(),
+            weight * bs.Vega());
+    }
+
+    private static string Format(double x) => x.ToString("G6");
+
+    private enum StrategyKind
+    {
+        Call,
+        Put,
+        CallSpread,
+        Straddle,
+        Butterfly
+    }
+
+    private readonly record struct GreekValues(double Price, double Delta, double Gamma, double Theta, double Vega)
+    {
+        public static GreekValues operator +(GreekValues a, GreekValues b)
+            => new(a.Price + b.Price, a.Delta + b.Delta, a.Gamma + b.Gamma, a.Theta + b.Theta, a.Vega + b.Vega);
+    }
+
+    private readonly record struct StrategyRow(string Name, GreekValues Greeks);
+}
