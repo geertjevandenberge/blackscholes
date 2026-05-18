@@ -1,0 +1,226 @@
+@page "/binomial-tree"
+@using MudBlazor
+@using Pricer.Numerics
+@using Plotly.Blazor
+@using Plotly.Blazor.ConfigLib
+@using Plotly.Blazor.LayoutLib
+@using Plotly.Blazor.Traces
+@using Plotly.Blazor.Traces.ScatterLib
+
+<MudPaper Class="pa-4">
+    <MudText Typo="Typo.h5">Binomial Tree Pricer</MudText>
+    <MudText Typo="Typo.body2" Class="mb-4">
+        Cox–Ross–Rubinstein binomial tree price for a European call option converges to the
+        Black–Scholes price as the number of steps <em>n</em> grows.
+    </MudText>
+
+    <MudGrid GutterSize="3">
+        <MudItem xs="12" md="4">
+            <MudPaper Class="pa-3">
+                <MudText Typo="Typo.subtitle2" Class="mb-2">Model Inputs</MudText>
+
+                <MudNumericField T="double" @bind-Value="Spot"           Label="Spot (S)"                   Immediate="true" Class="mt-2" />
+                <MudNumericField T="double" @bind-Value="Strike"         Label="Strike (K)"                 Immediate="true" Class="mt-2" />
+                <MudNumericField T="double" @bind-Value="RiskFreeRate"   Label="Risk-free rate r"            Immediate="true" Class="mt-2" />
+                <MudNumericField T="double" @bind-Value="DividendYield"  Label="Dividend yield q"            Immediate="true" Class="mt-2" />
+                <MudNumericField T="double" @bind-Value="Volatility"     Label="Volatility σ"               Immediate="true" Class="mt-2" />
+                <MudNumericField T="double" @bind-Value="TimeToMaturity" Label="Time to maturity T (years)" Immediate="true" Class="mt-2" />
+
+                <MudDivider Class="my-3" />
+
+                <MudText Typo="Typo.subtitle2" Class="mb-2">Convergence Range</MudText>
+                <MudNumericField T="int" @bind-Value="MaxSteps" Label="Max steps (n)" Min="10" Max="1000" Immediate="true" Class="mt-2" />
+
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Recalculate" Class="mt-4" FullWidth="true">
+                    Calculate
+                </MudButton>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="8">
+            <MudPaper Class="pa-3">
+                <MudText Typo="Typo.subtitle2">Black–Scholes price</MudText>
+                <MudText Typo="Typo.h6" Color="Color.Primary">@BsPrice.ToString("F6")</MudText>
+
+                <MudDivider Class="my-2" />
+
+                <MudText Typo="Typo.subtitle2">Binomial price at n = @MaxSteps</MudText>
+                <MudText Typo="Typo.h6" Color="Color.Secondary">@BinomialPriceAtMax.ToString("F6")</MudText>
+
+                <MudText Typo="Typo.caption" Class="mt-1">
+                    Error at n = @MaxSteps: @Math.Abs(BinomialPriceAtMax - BsPrice).ToString("E3")
+                </MudText>
+            </MudPaper>
+
+            <MudPaper Class="pa-3 mt-3">
+                <MudText Typo="Typo.subtitle2" Class="mb-2">Convergence chart — binomial price vs n</MudText>
+                <PlotlyChart @ref="convergenceChart"
+                             Data="chartData"
+                             Layout="chartLayout"
+                             Config="chartConfig"
+                             Style="height: 380px; width: 100%;" />
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12">
+            <MudPaper Class="pa-3">
+                <MudText Typo="Typo.subtitle2" Class="mb-2">Price vs Spot — Binomial (n = @MaxSteps) vs Black–Scholes</MudText>
+                <PlotlyChart @ref="spotChart"
+                             Data="spotChartData"
+                             Layout="spotChartLayout"
+                             Config="chartConfig"
+                             Style="height: 380px; width: 100%;" />
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@code {
+    private double Spot = 100.0;
+    private double Strike = 100.0;
+    private double RiskFreeRate = 0.05;
+    private double DividendYield = 0.0;
+    private double Volatility = 0.20;
+    private double TimeToMaturity = 1.0;
+    private int MaxSteps = 200;
+
+    private double BsPrice;
+    private double BinomialPriceAtMax;
+
+    private readonly Config chartConfig = new() { Responsive = true, DisplayModeBar = DisplayModeBarEnum.False };
+
+    private List<ITrace> chartData = [];
+    private Layout chartLayout = new();
+
+    private List<ITrace> spotChartData = [];
+    private Layout spotChartLayout = new();
+
+    private PlotlyChart? convergenceChart;
+    private PlotlyChart? spotChart;
+    private bool chartsNeedReact;
+
+    protected override void OnInitialized() => Recalculate();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!chartsNeedReact)
+            return;
+
+        chartsNeedReact = false;
+
+        var tasks = new List<Task>(2);
+        if (convergenceChart is not null) tasks.Add(convergenceChart.React());
+        if (spotChart is not null)        tasks.Add(spotChart.React());
+
+        if (tasks.Count > 0)
+            await Task.WhenAll(tasks);
+    }
+
+    private void Recalculate()
+    {
+        BsPrice = new BlackScholes(OptionType.Call, RiskFreeRate, TimeToMaturity, Volatility, Strike, Spot, DividendYield).Price();
+
+        BuildConvergenceChart();
+        BuildSpotChart();
+
+        chartsNeedReact = true;
+        StateHasChanged();
+    }
+
+    private void BuildConvergenceChart()
+    {
+        // Sample n values: every step up to 20, then every 5, then every 10 for efficiency
+        var nValues = ConvergenceSteps(MaxSteps);
+
+        var xN     = new object[nValues.Count];
+        var yBinom = new object[nValues.Count];
+        var yBs    = new object[nValues.Count];
+
+        for (int i = 0; i < nValues.Count; i++)
+        {
+            int n = nValues[i];
+            xN[i]     = n;
+            yBinom[i] = new BinomialTreePricer(OptionType.Call, RiskFreeRate, TimeToMaturity, Volatility, Strike, Spot, DividendYield).Price(n);
+            yBs[i]    = BsPrice;
+        }
+
+        BinomialPriceAtMax = (double)yBinom[^1];
+
+        chartData =
+        [
+            new Scatter { Name = "Binomial (CRR)", X = xN, Y = yBinom, Mode = ModeFlag.Lines,
+                Line = new Plotly.Blazor.Traces.ScatterLib.Line { Color = "#1976D2" } },
+            new Scatter { Name = "Black–Scholes",  X = xN, Y = yBs,    Mode = ModeFlag.Lines,
+                Line = new Plotly.Blazor.Traces.ScatterLib.Line { Color = "#E64A19", Dash = "dash" } }
+        ];
+
+        chartLayout = new Layout
+        {
+            Title = new Plotly.Blazor.LayoutLib.Title
+            {
+                Text = $"Binomial tree convergence — Call (S={Spot}, K={Strike}, T={TimeToMaturity:F2}, σ={Volatility:F2}, r={RiskFreeRate:F2})"
+            },
+            XAxis = [new() { Title = new Plotly.Blazor.LayoutLib.XAxisLib.Title { Text = "Steps n" } }],
+            YAxis = [new() { Title = new Plotly.Blazor.LayoutLib.YAxisLib.Title { Text = "Price" } }],
+            Margin = new Plotly.Blazor.LayoutLib.Margin { L = 60, R = 20, T = 50, B = 50 },
+            Legend = new Plotly.Blazor.LayoutLib.Legend { Orientation = (Plotly.Blazor.LayoutLib.LegendLib.OrientationEnum?)Plotly.Blazor.LayoutLib.LegendLib.OrientationEnum.H }
+        };
+    }
+
+    private void BuildSpotChart()
+    {
+        const int points = 101;
+        double spotMin = Strike * 0.5;
+        double spotMax = Strike * 1.5;
+
+        var xSpot   = new object[points];
+        var yBinom  = new object[points];
+        var yBs     = new object[points];
+
+        for (int i = 0; i < points; i++)
+        {
+            double s = spotMin + (spotMax - spotMin) * i / (points - 1);
+            xSpot[i]  = s;
+            yBs[i]    = new BlackScholes(OptionType.Call, RiskFreeRate, TimeToMaturity, Volatility, Strike, s, DividendYield).Price();
+            yBinom[i] = new BinomialTreePricer(OptionType.Call, RiskFreeRate, TimeToMaturity, Volatility, Strike, s, DividendYield).Price(MaxSteps);
+        }
+
+        spotChartData =
+        [
+            new Scatter { Name = $"Binomial n={MaxSteps}", X = xSpot, Y = yBinom, Mode = ModeFlag.Lines,
+                Line = new Plotly.Blazor.Traces.ScatterLib.Line { Color = "#1976D2" } },
+            new Scatter { Name = "Black–Scholes",          X = xSpot, Y = yBs,    Mode = ModeFlag.Lines,
+                Line = new Plotly.Blazor.Traces.ScatterLib.Line { Color = "#E64A19", Dash = "dash" } }
+        ];
+
+        spotChartLayout = new Layout
+        {
+            Title = new Plotly.Blazor.LayoutLib.Title
+            {
+                Text = $"Price vs Spot — n={MaxSteps} (T={TimeToMaturity:F2}, σ={Volatility:F2})"
+            },
+            XAxis = [new() { Title = new Plotly.Blazor.LayoutLib.XAxisLib.Title { Text = "Spot (S)" } }],
+            YAxis = [new() { Title = new Plotly.Blazor.LayoutLib.YAxisLib.Title { Text = "Call Price" } }],
+            Margin = new Plotly.Blazor.LayoutLib.Margin { L = 60, R = 20, T = 50, B = 50 },
+            Legend = new Plotly.Blazor.LayoutLib.Legend { Orientation = (Plotly.Blazor.LayoutLib.LegendLib.OrientationEnum?)Plotly.Blazor.LayoutLib.LegendLib.OrientationEnum.H }
+        };
+    }
+
+    /// <summary>
+    /// Returns a list of step counts up to <paramref name="max"/> with increasing spacing
+    /// to keep the chart responsive while still showing fine detail at low n.
+    /// </summary>
+    private static List<int> ConvergenceSteps(int max)
+    {
+        var steps = new List<int>();
+        for (int n = 1; n <= Math.Min(max, 20); n++)
+            steps.Add(n);
+        for (int n = 25; n <= Math.Min(max, 100); n += 5)
+            steps.Add(n);
+        for (int n = 110; n <= max; n += 10)
+            steps.Add(n);
+        if (steps.Count == 0 || steps[^1] != max)
+            steps.Add(max);
+        return steps;
+    }
+}
